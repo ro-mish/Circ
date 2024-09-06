@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Object Detection</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;600&display=swap');
+
+        :root {
+            --bg-color: #1a1a1a;
+            --card-bg: #2a2a2a;
+            --accent-orange: #FF8C42;
+            --accent-purple: #9C6BFF;
+            --text-color: #F2E9E4;
+        }
+
+        body {
+            font-family: 'Poppins', sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+        }
+
+        .card {
+            background-color: var(--card-bg);
+            border-radius: 1rem;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            transition: transform 0.3s ease;
+        }
+
+        .card:hover {
+            transform: translateY(-5px);
+        }
+
+        .btn {
+            background-image: linear-gradient(45deg, var(--accent-orange), var(--accent-purple));
+            color: var(--bg-color);
+            font-weight: 600;
+            transition: all 0.3s ease;
+        }
+
+        .btn:hover {
+            opacity: 0.9;
+        }
+
+        select {
+            background-color: var(--card-bg);
+            border: 2px solid var(--accent-purple);
+            color: var(--text-color);
+            padding: 0.5rem;
+            border-radius: 0.5rem;
+            appearance: none;
+            background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='%239C6BFF' viewBox='0 0 24 24'%3E%3Cpath d='M7 10l5 5 5-5z'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-position: right 0.7rem top 50%;
+            background-size: 1.5rem auto;
+        }
+
+        #summary-text::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        #summary-text::-webkit-scrollbar-track {
+            background: var(--card-bg);
+        }
+
+        #summary-text::-webkit-scrollbar-thumb {
+            background-color: var(--accent-purple);
+            border-radius: 20px;
+        }
+
+        .gradient-text {
+            background: linear-gradient(45deg, var(--accent-orange), var(--accent-purple));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        #sine-wave {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            height: 100px;
+            z-index: -1;
+        }
+
+        #chat-window {
+            height: 300px;
+            overflow-y: auto;
+            border: 1px solid var(--accent-purple);
+            border-radius: 0.5rem;
+            padding: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        #chat-input {
+            width: 100%;
+            padding: 0.5rem;
+            border: 1px solid var(--accent-purple);
+            border-radius: 0.5rem;
+            background-color: var(--card-bg);
+            color: var(--text-color);
+        }
+
+        #log-container {
+            height: 300px;
+            overflow-y: auto;
+            border: 1px solid var(--accent-purple);
+            border-radius: 0.5rem;
+            padding: 1rem;
+            margin-bottom: 1rem;
+            font-size: 0.9rem;
+        }
+
+        #log-container::-webkit-scrollbar {
+            width: 8px;
+        }
+
+        #log-container::-webkit-scrollbar-track {
+            background: var(--card-bg);
+        }
+
+        #log-container::-webkit-scrollbar-thumb {
+            background-color: var(--accent-purple);
+            border-radius: 20px;
+        }
+    </style>
+</head>
+<body class="min-h-screen p-8">
+    <canvas id="sine-wave"></canvas>
+    <div class="container mx-auto flex flex-col lg:flex-row gap-8">
+        <div class="lg:w-2/3 space-y-8">
+            <div class="card p-6">
+                <h2 class="text-2xl font-semibold mb-4 gradient-text">Live Feed</h2>
+                <img id="video-feed" src="{{ url_for('video_feed') }}" alt="Video Feed" class="w-full rounded-lg">
+            </div>
+            <div class="card p-6">
+                <h2 class="text-2xl font-semibold mb-4 gradient-text">Time Series Data</h2>
+                <canvas id="timeSeriesChart"></canvas>
+            </div>
+            <div class="card p-6">
+                <h2 class="text-2xl font-semibold mb-4 gradient-text">Object Occurrences</h2>
+                <canvas id="objectOccurrencesChart"></canvas>
+            </div>
+        </div>
+        <div class="lg:w-1/3 space-y-8">
+            <div class="card p-6">
+                <h2 class="text-2xl font-semibold mb-4 gradient-text">Sampling Frequency</h2>
+                <select id="summary-interval" class="w-full mb-4">
+                    <option value="10">10 seconds</option>
+                    <option value="30">30 seconds</option>
+                    <option value="60" selected>1 minute</option>
+                    <option value="120">2 minutes</option>
+                    <option value="300">5 minutes</option>
+                    <option value="600">10 minutes</option>
+                </select>
+            </div>
+            <div class="card p-6">
+                <h2 class="text-2xl font-semibold mb-4 gradient-text">Event Logs</h2>
+                <div id="log-container"></div>
+            </div>
+            <div class="card p-6">
+                <h2 class="text-2xl font-semibold mb-4 gradient-text">Event Query</h2>
+                <div id="chat-window"></div>
+                <input type="text" id="chat-input" placeholder="Ask about events (e.g., 'What happened between 14:00 and 15:00?')">
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const socket = io();
+        const summaryText = document.getElementById('summary-text');
+        const timeSeriesCtx = document.getElementById('timeSeriesChart').getContext('2d');
+        const objectOccurrencesCtx = document.getElementById('objectOccurrencesChart').getContext('2d');
+        const summaryIntervalSelect = document.getElementById('summary-interval');
+        const chatWindow = document.getElementById('chat-window');
+        const chatInput = document.getElementById('chat-input');
+        const logContainer = document.getElementById('log-container');
+
+        let timeSeriesChart = new Chart(timeSeriesCtx, {
+            type: 'line',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: 'People Count',
+                    data: [],
+                    borderColor: '#FF8C42',
+                    tension: 0.1
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: {
+                        labels: {
+                            color: '#F2E9E4'
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        display: true,
+                        title: {
+                            display: true,
+                            text: 'Time',
+                            color: '#F2E9E4'
+                        },
+                        ticks: {
+                            color: '#F2E9E4'
+                        }
+                    },
+                    y: {
+                        display: true,
+                        title: {
+                            display: true,
+                            text: 'Count',
+                            color: '#F2E9E4'
+                        },
+                        ticks: {
+                            color: '#F2E9E4'
+                        },
+                        suggestedMin: 0
+                    }
+                }
+            }
+        });
+
+        let objectOccurrencesChart = new Chart(objectOccurrencesCtx, {
+            type: 'bar',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: 'Total Object Occurrences',
+                    data: [],
+                    backgroundColor: '#9C6BFF',
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: {
+                        labels: {
+                            color: '#F2E9E4'
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        display: true,
+                        title: {
+                            display: true,
+                            text: 'Object Type',
+                            color: '#F2E9E4'
+                        },
+                        ticks: {
+                            color: '#F2E9E4'
+                        }
+                    },
+                    y: {
+                        display: true,
+                        title: {
+                            display: true,
+                            text: 'Total Count',
+                            color: '#F2E9E4'
+                        },
+                        ticks: {
+                            color: '#F2E9E4'
+                        },
+                        suggestedMin: 0
+                    }
+                }
+            }
+        });
+
+        socket.on('connect', function() {
+            console.log('Connected to server');
+        });
+
+        socket.on('update', function(data) {
+            console.log('Received update:', data);
+            if (data.time_series_data) {
+                updateTimeSeriesChart(data.time_series_data);
+            }
+            if (data.total_object_counts) {
+                updateObjectOccurrencesChart(data.total_object_counts);
+            }
+        });
+
+        socket.on('log_update', function(data) {
+            const logEntry = document.createElement('div');
+            logEntry.textContent = data.log_entry;
+            logContainer.appendChild(logEntry);
+            logContainer.scrollTop = logContainer.scrollHeight;
+        });
+
+        function updateTimeSeriesChart(timeSeriesData) {
+            const latestData = timeSeriesData[0];  // We now only receive one data point per update
+            timeSeriesChart.data.labels.push(latestData.timestamp);
+            
+            // Ensure we only keep the last 10 data points for readability
+            if (timeSeriesChart.data.labels.length > 10) {
+                timeSeriesChart.data.labels.shift();
+                timeSeriesChart.data.datasets.forEach(dataset => dataset.data.shift());
+            }
+
+            // Update existing datasets and add new ones if necessary
+            Object.entries(latestData.object_counts).forEach(([objectType, count], index) => {
+                let dataset = timeSeriesChart.data.datasets.find(ds => ds.label === objectType);
+                if (!dataset) {
+                    dataset = {
+                        label: objectType,
+                        data: new Array(timeSeriesChart.data.labels.length - 1).fill(0),
+                        borderColor: `hsl(${index * 137.5 % 360}, 70%, 50%)`,
+                        tension: 0.1
+                    };
+                    timeSeriesChart.data.datasets.push(dataset);
+                }
+                dataset.data.push(count);
+            });
+
+            timeSeriesChart.update();
+        }
+
+        function updateObjectOccurrencesChart(totalObjectCounts) {
+            objectOccurrencesChart.data.labels = Object.keys(totalObjectCounts);
+            objectOccurrencesChart.data.datasets[0].data = Object.values(totalObjectCounts);
+            objectOccurrencesChart.update();
+        }
+
+        summaryIntervalSelect.addEventListener('change', function() {
+            const interval = this.value;
+            fetch('/set_interval', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: `interval=${interval}`
+            }).then(response => {
+                if (response.ok) {
+                    console.log(`Sampling frequency updated to ${interval} seconds`);
+                } else {
+                    console.error('Failed to update sampling frequency');
+                }
+            });
+        });
+
+        chatInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                const query = this.value;
+                this.value = '';
+                
+                // Add user query to chat window
+                addMessageToChat('User', query);
+
+                // Send query to server
+                fetch('/query_events', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        query: query
+                    })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    addMessageToChat('AI', data.summary);
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    addMessageToChat('AI', 'Sorry, there was an error processing your request.');
+                });
+            }
+        });
+
+        function addMessageToChat(sender, message) {
+            const messageElement = document.createElement('div');
+            messageElement.innerHTML = `<strong>${sender}:</strong> ${message}`;
+            chatWindow.appendChild(messageElement);
+            chatWindow.scrollTop = chatWindow.scrollHeight;
+        }
+
+        // Add sine wave animation
+        const canvas = document.getElementById('sine-wave');
+        const ctx = canvas.getContext('2d');
+
+        canvas.width = window.innerWidth;
+        canvas.height = 100;
+
+        function drawSineWave(time) {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            const gradient = ctx.createLinearGradient(0, 0, canvas.width, 0);
+            gradient.addColorStop(0, '#FF8C42');
+            gradient.addColorStop(1, '#9C6BFF');
+
+            ctx.strokeStyle = gradient;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+
+            for (let i = 0; i < canvas.width; i++) {
+                const x = i;
+                const y = Math.sin((i * 0.02) + time) * 20 + 50;
+                ctx.lineTo(x, y);
+            }
+
+            ctx.stroke();
+            requestAnimationFrame((t) => drawSineWave(t * 0.002));
+        }
+
+        drawSineWave(0);
+
+        window.addEventListener('resize', () => {
+            canvas.width = window.innerWidth;
+        });
+    </script>
+</body>
+</html>
